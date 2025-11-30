@@ -114,7 +114,7 @@ Traditional messaging apps treat each person as a single entity with one chat hi
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/multi-persona-messenger.git
+git clone https://github.com/Ajaykannagit/multi-persona-messenger.git
 cd multi-persona-messenger
 ```
 
