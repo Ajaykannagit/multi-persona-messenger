@@ -11,7 +11,7 @@ A next-generation messaging application built on the revolutionary concept that 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/multi-persona-messenger.git
+git clone https://github.com/Ajaykannagit/multi-persona-messenger.git
 cd multi-persona-messenger
 
 # Install dependencies
