@@ -26,6 +26,7 @@ interface Persona {
   color_secondary: string;
   color_accent: string;
   is_active: boolean;
+  is_custom: boolean;
 }
 
 export function Messenger() {
