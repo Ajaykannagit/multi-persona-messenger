@@ -142,6 +142,7 @@ export interface Database {
           last_message_at: string | null
           is_locked: boolean
           notification_enabled: boolean
+          unread_count: number
           created_at: string
         }
         Insert: {
@@ -151,6 +152,7 @@ export interface Database {
           last_message_at?: string | null
           is_locked?: boolean
           notification_enabled?: boolean
+          unread_count?: number
           created_at?: string
         }
         Update: {
@@ -160,6 +162,7 @@ export interface Database {
           last_message_at?: string | null
           is_locked?: boolean
           notification_enabled?: boolean
+          unread_count?: number
           created_at?: string
         }
       }
@@ -171,6 +174,12 @@ export interface Database {
           content: string
           detected_tone: string | null
           is_read: boolean
+          status: 'sent' | 'delivered' | 'read'
+          delivered_at: string | null
+          read_at: string | null
+          file_url: string | null
+          file_type: string | null
+          file_name: string | null
           created_at: string
         }
         Insert: {
@@ -180,6 +189,12 @@ export interface Database {
           content: string
           detected_tone?: string | null
           is_read?: boolean
+          status?: 'sent' | 'delivered' | 'read'
+          delivered_at?: string | null
+          read_at?: string | null
+          file_url?: string | null
+          file_type?: string | null
+          file_name?: string | null
           created_at?: string
         }
         Update: {
@@ -189,7 +204,59 @@ export interface Database {
           content?: string
           detected_tone?: string | null
           is_read?: boolean
+          status?: 'sent' | 'delivered' | 'read'
+          delivered_at?: string | null
+          read_at?: string | null
+          file_url?: string | null
+          file_type?: string | null
+          file_name?: string | null
           created_at?: string
+        }
+      }
+      user_presence: {
+        Row: {
+          id: string
+          user_id: string
+          status: 'online' | 'offline' | 'away'
+          last_seen: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          status: 'online' | 'offline' | 'away'
+          last_seen?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          status?: 'online' | 'offline' | 'away'
+          last_seen?: string
+          updated_at?: string
+        }
+      }
+      typing_indicators: {
+        Row: {
+          id: string
+          channel_id: string
+          user_id: string
+          created_at: string
+          expires_at: string
+        }
+        Insert: {
+          id?: string
+          channel_id: string
+          user_id: string
+          created_at?: string
+          expires_at?: string
+        }
+        Update: {
+          id?: string
+          channel_id?: string
+          user_id?: string
+          created_at?: string
+          expires_at?: string
         }
       }
       persona_analytics: {

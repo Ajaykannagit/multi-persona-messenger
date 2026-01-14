@@ -6,6 +6,8 @@ import { ChatView } from './ChatView';
 import { PersonaPanel } from './PersonaPanel';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { LogOut, BarChart3 } from 'lucide-react';
+import { startHeartbeat, stopHeartbeat } from '../lib/presenceService';
+import { initializeNotifications } from '../lib/notificationService';
 
 interface Contact {
   id: string;
@@ -39,6 +41,17 @@ export function Messenger() {
     if (user) {
       loadPersonas();
       loadContacts();
+
+      // Initialize presence tracking
+      startHeartbeat(user.id);
+
+      // Initialize notifications
+      initializeNotifications();
+
+      // Cleanup on unmount
+      return () => {
+        stopHeartbeat(user.id);
+      };
     }
   }, [user]);
 
@@ -139,6 +152,7 @@ export function Messenger() {
               selectedPersona={selectedPersona}
               onSelectPersona={setSelectedPersona}
               onRefreshPersonas={loadPersonas}
+              contactId={selectedContact.id}
             />
             <ChatView
               contact={selectedContact}

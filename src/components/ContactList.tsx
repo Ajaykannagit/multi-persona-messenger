@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { UserPlus, Search } from 'lucide-react';
+import { PresenceBadge } from './PresenceBadge';
+import { UnreadBadge } from './UnreadBadge';
+import { getMultipleUserPresence, subscribeToPresence } from '../lib/presenceService';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface Contact {
   id: string;
@@ -9,6 +13,12 @@ interface Contact {
   nickname: string | null;
   display_name: string;
   avatar_url: string | null;
+}
+
+interface ContactWithPresence extends Contact {
+  presence_status?: 'online' | 'offline' | 'away';
+  last_seen?: string;
+  unread_count?: number;
 }
 
 interface ContactListProps {
@@ -25,6 +35,69 @@ export function ContactList({ contacts, selectedContact, onSelectContact, onRefr
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [contactsWithPresence, setContactsWithPresence] = useState<ContactWithPresence[]>([]);
+  const [presenceChannel, setPresenceChannel] = useState<RealtimeChannel | null>(null);
+
+  useEffect(() => {
+    loadPresenceData();
+
+    return () => {
+      if (presenceChannel) {
+        supabase.removeChannel(presenceChannel);
+      }
+    };
+  }, [contacts]);
+
+  const loadPresenceData = async () => {
+    if (contacts.length === 0) {
+      setContactsWithPresence([]);
+      return;
+    }
+
+    const contactUserIds = contacts.map(c => c.contact_user_id);
+
+    // Load presence data
+    const presenceData = await getMultipleUserPresence(contactUserIds);
+    const presenceMap = new Map(presenceData.map(p => [p.user_id, p]));
+
+    // Load unread counts
+    const { data: unreadData } = await supabase
+      .from('contact_unread_counts')
+      .select('*')
+      .eq('user_id', user!.id);
+
+    const unreadMap = new Map(unreadData?.map(u => [u.contact_id, u.total_unread]) || []);
+
+    // Combine data
+    const enrichedContacts = contacts.map(contact => {
+      const presence = presenceMap.get(contact.contact_user_id);
+      return {
+        ...contact,
+        presence_status: presence?.status,
+        last_seen: presence?.last_seen,
+        unread_count: unreadMap.get(contact.id) || 0,
+      };
+    });
+
+    setContactsWithPresence(enrichedContacts);
+
+    // Subscribe to presence changes
+    if (presenceChannel) {
+      supabase.removeChannel(presenceChannel);
+    }
+
+    const channel = subscribeToPresence(contactUserIds, (presence) => {
+      setContactsWithPresence(prev =>
+        prev.map(c =>
+          c.contact_user_id === presence.user_id
+            ? { ...c, presence_status: presence.status, last_seen: presence.last_seen }
+            : c
+        )
+      );
+    });
+
+    setPresenceChannel(channel);
+  };
 
   const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,9 +147,28 @@ export function ContactList({ contacts, selectedContact, onSelectContact, onRefr
     }
   };
 
-  const filteredContacts = contacts.filter(contact =>
+  const filteredContacts = contactsWithPresence.filter(contact =>
     (contact.nickname || contact.display_name).toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Sort contacts: online first, then by unread count, then alphabetically
+  const sortedContacts = [...filteredContacts].sort((a, b) => {
+    // Online status priority
+    if (a.presence_status === 'online' && b.presence_status !== 'online') return -1;
+    if (a.presence_status !== 'online' && b.presence_status === 'online') return 1;
+
+    // Unread count priority
+    const aUnread = a.unread_count || 0;
+    const bUnread = b.unread_count || 0;
+    if (aUnread > 0 && bUnread === 0) return -1;
+    if (aUnread === 0 && bUnread > 0) return 1;
+    if (aUnread !== bUnread) return bUnread - aUnread;
+
+    // Alphabetical
+    const aName = a.nickname || a.display_name;
+    const bName = b.nickname || b.display_name;
+    return aName.localeCompare(bName);
+  });
 
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
@@ -139,27 +231,40 @@ export function ContactList({ contacts, selectedContact, onSelectContact, onRefr
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {filteredContacts.length === 0 ? (
+        {sortedContacts.length === 0 ? (
           <div className="p-6 text-center text-gray-500">
             {contacts.length === 0 ? 'No contacts yet' : 'No matching contacts'}
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {filteredContacts.map((contact) => (
+            {sortedContacts.map((contact) => (
               <button
                 key={contact.id}
                 onClick={() => onSelectContact(contact)}
-                className={`w-full p-4 text-left hover:bg-gray-50 transition-colors ${
-                  selectedContact?.id === contact.id ? 'bg-blue-50' : ''
-                }`}
+                className={`w-full p-4 text-left hover:bg-gray-50 transition-colors ${selectedContact?.id === contact.id ? 'bg-blue-50' : ''
+                  }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-teal-400 flex items-center justify-center text-white font-semibold text-lg">
-                    {(contact.nickname || contact.display_name).charAt(0).toUpperCase()}
+                  <div className="relative">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-teal-400 flex items-center justify-center text-white font-semibold text-lg">
+                      {(contact.nickname || contact.display_name).charAt(0).toUpperCase()}
+                    </div>
+                    <div className="absolute -bottom-1 -right-1">
+                      <PresenceBadge
+                        status={contact.presence_status || 'offline'}
+                        lastSeen={contact.last_seen}
+                        size="md"
+                      />
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">
-                      {contact.nickname || contact.display_name}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-gray-900 truncate">
+                        {contact.nickname || contact.display_name}
+                      </div>
+                      {contact.unread_count && contact.unread_count > 0 && (
+                        <UnreadBadge count={contact.unread_count} size="sm" />
+                      )}
                     </div>
                     <div className="text-sm text-gray-500 truncate">
                       {contact.display_name}

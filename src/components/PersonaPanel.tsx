@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import * as Icons from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit2, Trash2, Check, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Check } from 'lucide-react';
+import { UnreadBadge } from './UnreadBadge';
+import * as LucideIcons from 'lucide-react';
 
 interface Persona {
   id: string;
@@ -13,241 +14,334 @@ interface Persona {
   color_secondary: string;
   color_accent: string;
   is_active: boolean;
+  is_custom: boolean;
 }
 
 interface PersonaPanelProps {
   personas: Persona[];
-  selectedPersona: Persona;
+  selectedPersona: Persona | null;
   onSelectPersona: (persona: Persona) => void;
   onRefreshPersonas: () => void;
+  contactId?: string;
 }
 
-export function PersonaPanel({ personas, selectedPersona, onSelectPersona, onRefreshPersonas }: PersonaPanelProps) {
+export function PersonaPanel({ personas, selectedPersona, onSelectPersona, onRefreshPersonas, contactId }: PersonaPanelProps) {
   const { user } = useAuth();
-  const [showCreatePersona, setShowCreatePersona] = useState(false);
-  const [editingPersona, setEditingPersona] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    icon: 'Star',
-    color_primary: '#6366F1',
-    color_secondary: '#4F46E5',
-    color_accent: '#818CF8',
-  });
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
+  const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map());
 
-  const getIcon = (iconName: string) => {
-    const Icon = (Icons as any)[iconName] || Icons.Star;
-    return Icon;
-  };
+  useEffect(() => {
+    if (contactId) {
+      loadUnreadCounts();
+      subscribeToUnreadUpdates();
+    }
+  }, [contactId, personas]);
 
-  const handleCreatePersona = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const loadUnreadCounts = async () => {
+    if (!contactId) return;
 
-    await supabase.from('user_personas').insert({
-      user_id: user!.id,
-      ...formData,
-      is_custom: true,
-      is_active: true,
-    });
+    const { data } = await supabase
+      .from('persona_channels')
+      .select('persona_id, unread_count')
+      .eq('contact_id', contactId);
 
-    setFormData({
-      name: '',
-      description: '',
-      icon: 'Star',
-      color_primary: '#6366F1',
-      color_secondary: '#4F46E5',
-      color_accent: '#818CF8',
-    });
-    setShowCreatePersona(false);
-    onRefreshPersonas();
-  };
-
-  const handleUpdatePersona = async (personaId: string) => {
-    await supabase
-      .from('user_personas')
-      .update(formData)
-      .eq('id', personaId);
-
-    setEditingPersona(null);
-    onRefreshPersonas();
-  };
-
-  const handleDeletePersona = async (personaId: string) => {
-    if (confirm('Are you sure you want to delete this persona?')) {
-      await supabase.from('user_personas').delete().eq('id', personaId);
-      onRefreshPersonas();
+    if (data) {
+      const counts = new Map(data.map(d => [d.persona_id, d.unread_count]));
+      setUnreadCounts(counts);
     }
   };
 
-  const startEdit = (persona: Persona) => {
-    setFormData({
-      name: persona.name,
-      description: persona.description,
-      icon: persona.icon,
-      color_primary: persona.color_primary,
-      color_secondary: persona.color_secondary,
-      color_accent: persona.color_accent,
-    });
-    setEditingPersona(persona.id);
+  const subscribeToUnreadUpdates = () => {
+    if (!contactId) return;
+
+    const channel = supabase
+      .channel(`persona-channels:${contactId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'persona_channels',
+          filter: `contact_id=eq.${contactId}`,
+        },
+        (payload: any) => {
+          const updated = payload.new;
+          setUnreadCounts(prev => {
+            const newMap = new Map(prev);
+            newMap.set(updated.persona_id, updated.unread_count);
+            return newMap;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  };
+
+  const getIconComponent = (iconName: string) => {
+    const Icon = (LucideIcons as any)[iconName];
+    return Icon ? <Icon className="w-5 h-5" /> : <LucideIcons.Circle className="w-5 h-5" />;
   };
 
   return (
-    <div
-      className="border-b border-gray-200 transition-all duration-300"
-      style={{
-        background: `linear-gradient(135deg, ${selectedPersona.color_primary} 0%, ${selectedPersona.color_secondary} 100%)`,
-      }}
-    >
-      <div className="px-6 py-4">
+    <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-gray-900">Personas</h2>
+        <button
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          title="Create custom persona"
+        >
+          <Plus className="w-5 h-5 text-gray-600" />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {personas.map((persona) => {
+          const unreadCount = unreadCounts.get(persona.id) || 0;
+
+          return (
+            <button
+              key={persona.id}
+              onClick={() => onSelectPersona(persona)}
+              className={`relative group px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${selectedPersona?.id === persona.id
+                  ? 'text-white shadow-md'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              style={
+                selectedPersona?.id === persona.id
+                  ? {
+                    background: `linear-gradient(135deg, ${persona.color_primary}, ${persona.color_accent})`,
+                  }
+                  : {}
+              }
+            >
+              {getIconComponent(persona.icon)}
+              <span>{persona.name}</span>
+              {unreadCount > 0 && (
+                <UnreadBadge count={unreadCount} size="sm" />
+              )}
+
+              {persona.is_custom && (
+                <div className="hidden group-hover:flex absolute -top-2 -right-2 gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingPersona(persona);
+                    }}
+                    className="p-1 bg-blue-500 text-white rounded-full hover:bg-blue-600"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeletePersona(persona.id);
+                    }}
+                    className="p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {(showCreateForm || editingPersona) && (
+        <PersonaForm
+          persona={editingPersona}
+          onClose={() => {
+            setShowCreateForm(false);
+            setEditingPersona(null);
+          }}
+          onSave={() => {
+            setShowCreateForm(false);
+            setEditingPersona(null);
+            onRefreshPersonas();
+          }}
+        />
+      )}
+    </div>
+  );
+
+  async function handleDeletePersona(personaId: string) {
+    if (!confirm('Are you sure you want to delete this persona?')) return;
+
+    await supabase
+      .from('user_personas')
+      .delete()
+      .eq('id', personaId);
+
+    onRefreshPersonas();
+  }
+}
+
+function PersonaForm({ persona, onClose, onSave }: {
+  persona: Persona | null;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const { user } = useAuth();
+  const [name, setName] = useState(persona?.name || '');
+  const [description, setDescription] = useState(persona?.description || '');
+  const [icon, setIcon] = useState(persona?.icon || 'Circle');
+  const [colorPrimary, setColorPrimary] = useState(persona?.color_primary || '#3B82F6');
+  const [colorSecondary, setColorSecondary] = useState(persona?.color_secondary || '#2563EB');
+  const [colorAccent, setColorAccent] = useState(persona?.color_accent || '#60A5FA');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      if (persona) {
+        // Update existing persona
+        await supabase
+          .from('user_personas')
+          .update({
+            name,
+            description,
+            icon,
+            color_primary: colorPrimary,
+            color_secondary: colorSecondary,
+            color_accent: colorAccent,
+          })
+          .eq('id', persona.id);
+      } else {
+        // Create new persona
+        await supabase
+          .from('user_personas')
+          .insert({
+            user_id: user!.id,
+            name,
+            description,
+            icon,
+            color_primary: colorPrimary,
+            color_secondary: colorSecondary,
+            color_accent: colorAccent,
+            is_custom: true,
+          });
+      }
+
+      onSave();
+    } catch (error) {
+      console.error('Error saving persona:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {(() => {
-              const Icon = getIcon(selectedPersona.icon);
-              return <Icon className="w-6 h-6 text-white" />;
-            })()}
-            <div>
-              <h2 className="text-xl font-bold text-white">{selectedPersona.name}</h2>
-              <p className="text-white/80 text-sm">{selectedPersona.description}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowCreatePersona(!showCreatePersona)}
-            className="p-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors"
-            title="Create persona"
-          >
-            <Plus className="w-5 h-5" />
+          <h3 className="text-lg font-semibold">
+            {persona ? 'Edit Persona' : 'Create Custom Persona'}
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          {personas.map((persona) => {
-            const Icon = getIcon(persona.icon);
-            const isEditing = editingPersona === persona.id;
-
-            return (
-              <div
-                key={persona.id}
-                className={`flex-shrink-0 group relative ${
-                  selectedPersona.id === persona.id
-                    ? 'ring-2 ring-white ring-offset-2'
-                    : ''
-                }`}
-              >
-                <button
-                  onClick={() => onSelectPersona(persona)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white rounded-lg transition-all"
-                  style={{ color: persona.color_primary }}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="font-medium text-sm">{persona.name}</span>
-                </button>
-
-                {!isEditing && (
-                  <div className="absolute top-0 right-0 -mt-1 -mr-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                    <button
-                      onClick={() => startEdit(persona)}
-                      className="p-1 bg-blue-500 hover:bg-blue-600 text-white rounded shadow-lg"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => handleDeletePersona(persona.id)}
-                      className="p-1 bg-red-500 hover:bg-red-600 text-white rounded shadow-lg"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {(showCreatePersona || editingPersona) && (
-          <form
-            onSubmit={editingPersona ? (e) => {
-              e.preventDefault();
-              handleUpdatePersona(editingPersona);
-            } : handleCreatePersona}
-            className="mt-4 bg-white rounded-lg p-4 space-y-3"
-          >
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                placeholder="Persona name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Icon name (e.g., Star)"
-                value={formData.icon}
-                onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Name
+            </label>
             <input
               type="text"
-              placeholder="Description"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             />
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-gray-600 mb-1 block">Primary</label>
-                <input
-                  type="color"
-                  value={formData.color_primary}
-                  onChange={(e) => setFormData({ ...formData, color_primary: e.target.value })}
-                  className="w-full h-10 rounded cursor-pointer"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-600 mb-1 block">Secondary</label>
-                <input
-                  type="color"
-                  value={formData.color_secondary}
-                  onChange={(e) => setFormData({ ...formData, color_secondary: e.target.value })}
-                  className="w-full h-10 rounded cursor-pointer"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-600 mb-1 block">Accent</label>
-                <input
-                  type="color"
-                  value={formData.color_accent}
-                  onChange={(e) => setFormData({ ...formData, color_accent: e.target.value })}
-                  className="w-full h-10 rounded cursor-pointer"
-                />
-              </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={2}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Icon (Lucide icon name)
+            </label>
+            <input
+              type="text"
+              value={icon}
+              onChange={(e) => setIcon(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g., Heart, Star, Zap"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Primary
+              </label>
+              <input
+                type="color"
+                value={colorPrimary}
+                onChange={(e) => setColorPrimary(e.target.value)}
+                className="w-full h-10 rounded cursor-pointer"
+              />
             </div>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white py-2 rounded-lg"
-              >
-                <Check className="w-4 h-4" />
-                {editingPersona ? 'Update' : 'Create'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowCreatePersona(false);
-                  setEditingPersona(null);
-                }}
-                className="flex-1 flex items-center justify-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-                Cancel
-              </button>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Secondary
+              </label>
+              <input
+                type="color"
+                value={colorSecondary}
+                onChange={(e) => setColorSecondary(e.target.value)}
+                className="w-full h-10 rounded cursor-pointer"
+              />
             </div>
-          </form>
-        )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Accent
+              </label>
+              <input
+                type="color"
+                value={colorAccent}
+                onChange={(e) => setColorAccent(e.target.value)}
+                className="w-full h-10 rounded cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              {saving ? 'Saving...' : persona ? 'Update' : 'Create'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg font-medium"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
