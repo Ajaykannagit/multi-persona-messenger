@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-18.3-blue.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-5.4-purple.svg)](https://vitejs.dev/)
 
-A next-generation messaging application built on the revolutionary concept that every person has multiple communication personas. Instead of a single chat thread per contact, the app generates multiple isolated chat channels for the same user—each representing a different emotional or functional context.
+A next-generation messaging application built on the revolutionary concept that every person has multiple communication personas. Instead of a single chat thread per contact, the app generates multiple isolated chat channels for the same user—each representing a different emotional or functional context..
 
 ## 🚀 Quick Start
 
